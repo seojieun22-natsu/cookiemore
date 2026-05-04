@@ -31,15 +31,16 @@ async function sendSms(text: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, is_soldout } = await req.json()
+  const { name, is_soldout, silent } = await req.json()
 
-  const title = is_soldout ? '🔴 품절 알림' : '🟢 판매 재개 알림'
-  const body = is_soldout
-    ? `[쿠키앤모어] 품절: ${name}`
-    : `[쿠키앤모어] 판매재개: ${name}`
+  // silent=true이면 SMS 발송 안 함 (전체 판매재개 등)
+  const isSpecialAlert = name.startsWith('[쿠키앤모어] ⚠️') || name.startsWith('[쿠키앤모어] 🚨')
+  const title = isSpecialAlert ? name : (is_soldout ? '🔴 품절 알림' : '🟢 판매 재개 알림')
+  const body = isSpecialAlert ? name : (is_soldout ? `[쿠키앤모어] 품절: ${name}` : `[쿠키앤모어] 판매재개: ${name}`)
 
-  // SMS 발송
-  await sendSms(body)
+  if (!silent) {
+    await sendSms(isSpecialAlert ? name : body)
+  }
 
   // Web Push 발송 (구독자 있을 경우)
   try {
