@@ -27,7 +27,7 @@ export default function AdminPage() {
 
     const fetchProducts = async () => {
       const { data } = await supabase
-        .from('products')
+        .from('cookie_items')
         .select('*')
         .order('id')
       if (data) setProducts(data)
@@ -40,7 +40,7 @@ export default function AdminPage() {
       .channel('admin-products')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'products' },
+        { event: '*', schema: 'public', table: 'cookie_items' },
         (payload) => {
           setProducts((prev) =>
             prev.map((p) =>
@@ -59,7 +59,7 @@ export default function AdminPage() {
   const toggleSoldout = async (product: Product) => {
     setUpdating(product.id)
     const { error } = await supabase
-      .from('products')
+      .from('cookie_items')
       .update({
         is_soldout: !product.is_soldout,
         updated_at: new Date().toISOString(),

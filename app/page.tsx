@@ -12,7 +12,7 @@ export default function StatusPage() {
     // Initial fetch
     const fetchProducts = async () => {
       const { data } = await supabase
-        .from('products')
+        .from('cookie_items')
         .select('*')
         .order('id')
       if (data) {
@@ -29,7 +29,7 @@ export default function StatusPage() {
       .channel('products-status')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'products' },
+        { event: '*', schema: 'public', table: 'cookie_items' },
         (payload) => {
           setProducts((prev) =>
             prev.map((p) =>
