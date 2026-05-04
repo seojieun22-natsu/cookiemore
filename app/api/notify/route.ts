@@ -13,6 +13,7 @@ async function sendSms(text: string) {
 
   if (!apiKey || !apiSecret || !from || !to) return
 
+  const recipients = to.split(',').map((n) => n.trim()).filter(Boolean)
   const date = new Date().toISOString()
   const salt = crypto.randomBytes(16).toString('hex')
   const signature = crypto
@@ -20,14 +21,17 @@ async function sendSms(text: string) {
     .update(date + salt)
     .digest('hex')
 
-  await fetch('https://api.solapi.com/messages/v4/send', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`,
-    },
-    body: JSON.stringify({ message: { to, from, text } }),
-  })
+  const authHeader = `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`
+
+  await Promise.allSettled(
+    recipients.map((recipient) =>
+      fetch('https://api.solapi.com/messages/v4/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ message: { to: recipient, from, text } }),
+      })
+    )
+  )
 }
 
 export async function POST(req: NextRequest) {
