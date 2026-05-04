@@ -3,35 +3,64 @@ export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import webpush from 'web-push'
+import crypto from 'crypto'
+
+async function sendSms(text: string) {
+  const apiKey = process.env.SOLAPI_API_KEY
+  const apiSecret = process.env.SOLAPI_API_SECRET
+  const from = process.env.SMS_FROM
+  const to = process.env.SMS_TO
+
+  if (!apiKey || !apiSecret || !from || !to) return
+
+  const date = new Date().toISOString()
+  const salt = crypto.randomBytes(16).toString('hex')
+  const signature = crypto
+    .createHmac('sha256', apiSecret)
+    .update(date + salt)
+    .digest('hex')
+
+  await fetch('https://api.solapi.com/messages/v4/send', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`,
+    },
+    body: JSON.stringify({ message: { to, from, text } }),
+  })
+}
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-
-  webpush.setVapidDetails(
-    'mailto:admin@cookiemore.com',
-    process.env.VAPID_PUBLIC_KEY!,
-    process.env.VAPID_PRIVATE_KEY!
-  )
-
   const { name, is_soldout } = await req.json()
+
   const title = is_soldout ? '🔴 품절 알림' : '🟢 판매 재개 알림'
   const body = is_soldout
-    ? `${name} 품절 처리됐습니다.`
-    : `${name} 판매 재개됐습니다.`
+    ? `[쿠키앤모어] 품절: ${name}`
+    : `[쿠키앤모어] 판매재개: ${name}`
 
-  const { data: subs } = await supabase.from('push_subscriptions').select('subscription')
-  if (!subs || subs.length === 0) return NextResponse.json({ ok: true, sent: 0 })
+  // SMS 발송
+  await sendSms(body)
 
-  const results = await Promise.allSettled(
-    subs.map((row) => {
-      const sub = JSON.parse(row.subscription)
-      return webpush.sendNotification(sub, JSON.stringify({ title, body }))
-    })
-  )
+  // Web Push 발송 (구독자 있을 경우)
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    webpush.setVapidDetails(
+      'mailto:admin@cookiemore.com',
+      process.env.VAPID_PUBLIC_KEY!,
+      process.env.VAPID_PRIVATE_KEY!
+    )
+    const { data: subs } = await supabase.from('push_subscriptions').select('subscription')
+    if (subs && subs.length > 0) {
+      await Promise.allSettled(
+        subs.map((row) =>
+          webpush.sendNotification(JSON.parse(row.subscription), JSON.stringify({ title, body }))
+        )
+      )
+    }
+  } catch {}
 
-  const sent = results.filter((r) => r.status === 'fulfilled').length
-  return NextResponse.json({ ok: true, sent })
+  return NextResponse.json({ ok: true })
 }
