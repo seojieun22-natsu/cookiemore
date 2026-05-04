@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react'
 import { supabase, Product } from '@/lib/supabase'
 
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
+
 export default function StatusPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [loading, setLoading] = useState(true)
+  const [notifState, setNotifState] = useState<'idle' | 'subscribed' | 'denied' | 'unsupported'>('idle')
 
   useEffect(() => {
-    // Initial fetch
     const fetchProducts = async () => {
       const { data } = await supabase
         .from('cookie_items')
@@ -24,7 +26,6 @@ export default function StatusPage() {
 
     fetchProducts()
 
-    // Realtime subscription
     const channel = supabase
       .channel('products-status')
       .on(
@@ -41,10 +42,40 @@ export default function StatusPage() {
       )
       .subscribe()
 
+    // Check existing push subscription
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.register('/sw.js').then(async (reg) => {
+        const existing = await reg.pushManager.getSubscription()
+        if (existing) setNotifState('subscribed')
+      })
+    } else {
+      setNotifState('unsupported')
+    }
+
     return () => {
       supabase.removeChannel(channel)
     }
   }, [])
+
+  const subscribePush = async () => {
+    if (!('serviceWorker' in navigator)) return
+    const reg = await navigator.serviceWorker.ready
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      setNotifState('denied')
+      return
+    }
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: VAPID_PUBLIC_KEY,
+    })
+    await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    })
+    setNotifState('subscribed')
+  }
 
   const formatTime = (date: Date) => {
     return date.toLocaleString('ko-KR', {
@@ -60,8 +91,7 @@ export default function StatusPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="text-center mb-8">
+      <div className="text-center mb-6">
         <h1 className="text-2xl font-bold text-gray-800 mb-1">🍪 쿠키앤모어 재고현황</h1>
         <p className="text-sm text-gray-400">최종 업데이트: {formatTime(lastUpdated)}</p>
         {!loading && (
@@ -69,6 +99,20 @@ export default function StatusPage() {
             전체 {products.length}종 중{' '}
             <span className="text-red-500 font-semibold">{soldoutCount}종 품절</span>
           </p>
+        )}
+        {notifState === 'idle' && (
+          <button
+            onClick={subscribePush}
+            className="mt-3 text-xs px-4 py-2 rounded-full bg-orange-50 text-orange-500 border border-orange-200 hover:bg-orange-100 transition-colors"
+          >
+            🔔 품절 알림 받기
+          </button>
+        )}
+        {notifState === 'subscribed' && (
+          <p className="mt-3 text-xs text-green-600">🔔 알림 구독 중</p>
+        )}
+        {notifState === 'denied' && (
+          <p className="mt-3 text-xs text-gray-400">알림 권한이 거부됐어요. 브라우저 설정에서 허용해주세요.</p>
         )}
       </div>
 
