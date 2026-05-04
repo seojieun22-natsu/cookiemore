@@ -5,64 +5,71 @@ import { createClient } from '@supabase/supabase-js'
 import webpush from 'web-push'
 import crypto from 'crypto'
 
-async function sendSms(text: string) {
+async function sendSms(text: string, recipients: string[]) {
   const apiKey = process.env.SOLAPI_API_KEY
   const apiSecret = process.env.SOLAPI_API_SECRET
   const from = process.env.SMS_FROM
-  const to = process.env.SMS_TO
 
-  if (!apiKey || !apiSecret || !from || !to) return
+  if (!apiKey || !apiSecret || !from || recipients.length === 0) return
 
-  const recipients = to.split(',').map((n) => n.trim()).filter(Boolean)
   const date = new Date().toISOString()
   const salt = crypto.randomBytes(16).toString('hex')
-  const signature = crypto
-    .createHmac('sha256', apiSecret)
-    .update(date + salt)
-    .digest('hex')
-
+  const signature = crypto.createHmac('sha256', apiSecret).update(date + salt).digest('hex')
   const authHeader = `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`
 
   await Promise.allSettled(
-    recipients.map((recipient) =>
+    recipients.map((to) =>
       fetch('https://api.solapi.com/messages/v4/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ message: { to: recipient, from, text } }),
+        body: JSON.stringify({ message: { to, from, text } }),
       })
     )
   )
 }
 
 export async function POST(req: NextRequest) {
-  const { name, is_soldout, silent } = await req.json()
+  const { names, is_soldout, silent } = await req.json()
 
-  // silent=true이면 SMS 발송 안 함 (전체 판매재개 등)
-  const isSpecialAlert = name.startsWith('[쿠키앤모어] ⚠️') || name.startsWith('[쿠키앤모어] 🚨')
-  const title = isSpecialAlert ? name : (is_soldout ? '🔴 품절 알림' : '🟢 판매 재개 알림')
-  const body = isSpecialAlert ? name : (is_soldout ? `[쿠키앤모어] 품절: ${name}` : `[쿠키앤모어] 판매재개: ${name}`)
+  if (silent) return NextResponse.json({ ok: true })
 
-  if (!silent) {
-    await sendSms(isSpecialAlert ? name : body)
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  // 수신자 목록 가져오기 (DB 우선, 없으면 env fallback)
+  const { data: recipientRows } = await supabase.from('sms_recipients').select('phone')
+  const dbRecipients = recipientRows?.map((r) => r.phone) ?? []
+  const envRecipients = (process.env.SMS_TO ?? '').split(',').map((n) => n.trim()).filter(Boolean)
+  const recipients = dbRecipients.length > 0 ? dbRecipients : envRecipients
+
+  const nameList = Array.isArray(names) ? names : [names]
+  const isSpecial = nameList.length === 1 && (nameList[0].startsWith('[쿠키앤모어] ⚠️') || nameList[0].startsWith('[쿠키앤모어] 🚨'))
+
+  let smsText: string
+  if (isSpecial) {
+    smsText = nameList[0]
+  } else if (is_soldout) {
+    smsText = nameList.length === 1
+      ? `[쿠키앤모어] 품절: ${nameList[0]}`
+      : `[쿠키앤모어] 품절 (${nameList.length}종)\n${nameList.map((n) => `• ${n.replace('쿠키앤모어 ', '')}`).join('\n')}`
+  } else {
+    smsText = nameList.length === 1
+      ? `[쿠키앤모어] 판매재개: ${nameList[0]}`
+      : `[쿠키앤모어] 판매재개 (${nameList.length}종)\n${nameList.map((n) => `• ${n.replace('쿠키앤모어 ', '')}`).join('\n')}`
   }
 
-  // Web Push 발송 (구독자 있을 경우)
+  await sendSms(smsText, recipients)
+
+  // Web Push
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
-    webpush.setVapidDetails(
-      'mailto:admin@cookiemore.com',
-      process.env.VAPID_PUBLIC_KEY!,
-      process.env.VAPID_PRIVATE_KEY!
-    )
+    webpush.setVapidDetails('mailto:admin@cookiemore.com', process.env.VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!)
     const { data: subs } = await supabase.from('push_subscriptions').select('subscription')
     if (subs && subs.length > 0) {
+      const title = is_soldout ? '🔴 품절 알림' : '🟢 판매 재개 알림'
       await Promise.allSettled(
-        subs.map((row) =>
-          webpush.sendNotification(JSON.parse(row.subscription), JSON.stringify({ title, body }))
-        )
+        subs.map((row) => webpush.sendNotification(JSON.parse(row.subscription), JSON.stringify({ title, body: smsText })))
       )
     }
   } catch {}
