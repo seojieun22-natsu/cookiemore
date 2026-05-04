@@ -11,6 +11,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState<number | null>(null)
+  const [resetting, setResetting] = useState(false)
   const [error, setError] = useState('')
 
   const handleLogin = () => {
@@ -58,18 +59,44 @@ export default function AdminPage() {
 
   const toggleSoldout = async (product: Product) => {
     setUpdating(product.id)
+    const newStatus = !product.is_soldout
     const { error } = await supabase
       .from('cookie_items')
       .update({
-        is_soldout: !product.is_soldout,
+        is_soldout: newStatus,
         updated_at: new Date().toISOString(),
       })
       .eq('id', product.id)
 
     if (error) {
       alert('업데이트 실패: ' + error.message)
+    } else {
+      setProducts((prev) =>
+        prev.map((p) => p.id === product.id ? { ...p, is_soldout: newStatus } : p)
+      )
+      fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: product.name, is_soldout: newStatus }),
+      }).catch(() => {})
     }
     setUpdating(null)
+  }
+
+  const resetAll = async () => {
+    if (!confirm('전체 품목을 판매재개 상태로 초기화할까요?')) return
+    setResetting(true)
+    const { error } = await supabase
+      .from('cookie_items')
+      .update({ is_soldout: false, updated_at: new Date().toISOString() })
+      .neq('id', 0)
+
+    if (error) {
+      alert('초기화 실패: ' + error.message)
+    } else {
+      setProducts((prev) => prev.map((p) => ({ ...p, is_soldout: false })))
+    }
+    setResetting(false)
   }
 
   if (!authenticated) {
@@ -97,16 +124,31 @@ export default function AdminPage() {
     )
   }
 
+  const soldoutCount = products.filter((p) => p.is_soldout).length
+
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-bold text-gray-800">🍪 재고 관리</h1>
-        <a
-          href="/"
-          className="text-xs text-gray-400 hover:text-gray-600 underline"
-        >
+        <a href="/" className="text-xs text-gray-400 hover:text-gray-600 underline">
           공개 페이지 보기
         </a>
+      </div>
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-sm text-gray-500">
+          {soldoutCount > 0 ? (
+            <span><span className="text-red-500 font-semibold">{soldoutCount}종 품절</span> / 전체 {products.length}종</span>
+          ) : (
+            <span className="text-green-600 font-semibold">전체 판매중</span>
+          )}
+        </p>
+        <button
+          onClick={resetAll}
+          disabled={resetting || soldoutCount === 0}
+          className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-40 transition-colors"
+        >
+          {resetting ? '초기화 중...' : '전체 판매재개'}
+        </button>
       </div>
 
       {loading ? (
