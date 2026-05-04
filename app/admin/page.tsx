@@ -112,7 +112,7 @@ export default function AdminPage() {
       {loading ? (
         <div className="text-center text-gray-400 py-20">불러오는 중...</div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {products.map((product) => (
             <div
               key={product.id}
