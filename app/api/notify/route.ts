@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   const { data: recipientRows } = await supabase.from('sms_recipients').select('phone')
   const dbRecipients = recipientRows?.map((r) => r.phone) ?? []
   const envRecipients = (process.env.SMS_TO ?? '').split(',').map((n) => n.trim()).filter(Boolean)
-  const recipients = dbRecipients.length > 0 ? dbRecipients : envRecipients
+  const recipients = [...new Set([...dbRecipients, ...envRecipients])]
 
   const nameList = Array.isArray(names) ? names : [names]
   const isSpecial = nameList.length === 1 && (nameList[0].startsWith('[쿠키앤모어] ⚠️') || nameList[0].startsWith('[쿠키앤모어] 🚨'))
