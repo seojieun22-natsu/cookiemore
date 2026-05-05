@@ -75,6 +75,8 @@ export default function AdminPage() {
       const levain = updated.filter((p) => LEVAIN_NAMES.includes(p.name))
       if (levain.every((p) => p.is_soldout)) await notify(['[쿠키앤모어] ⚠️ 르뱅쿠키 전체 품절'], true)
       if (updated.every((p) => p.is_soldout)) await notify(['[쿠키앤모어] 🚨 전체 제품 품절'], true)
+    } else {
+      await notify([product.name], false)
     }
   }
 
