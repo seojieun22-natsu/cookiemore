@@ -17,15 +17,13 @@ async function sendSms(text: string, recipients: string[]) {
   const signature = crypto.createHmac('sha256', apiSecret).update(date + salt).digest('hex')
   const authHeader = `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`
 
-  await Promise.allSettled(
-    recipients.map((to) =>
-      fetch('https://api.solapi.com/messages/v4/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ message: { to, from, text } }),
-      })
-    )
-  )
+  await fetch('https://api.solapi.com/messages/v4/send-many', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+    body: JSON.stringify({
+      messages: recipients.map((to) => ({ to, from, text })),
+    }),
+  })
 }
 
 export async function POST(req: NextRequest) {
